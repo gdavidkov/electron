@@ -3832,6 +3832,45 @@ double WebContents::GetZoomFactor() const {
   return blink::ZoomLevelToZoomFactor(level);
 }
 
+void WebContents::SetZoomMode(gin_helper::ErrorThrower thrower,
+                              std::string mode) {
+  WebContentsZoomController::ZoomMode zoom_mode;
+  if (mode == "default")
+    zoom_mode = WebContentsZoomController::ZOOM_MODE_DEFAULT;
+  else if (mode == "isolated")
+    zoom_mode = WebContentsZoomController::ZOOM_MODE_ISOLATED;
+  else if (mode == "manual")
+    zoom_mode = WebContentsZoomController::ZOOM_MODE_MANUAL;
+  else if (mode == "disabled")
+    zoom_mode = WebContentsZoomController::ZOOM_MODE_DISABLED;
+  else {
+    thrower.ThrowError(
+        "'zoomMode' must be 'default', 'isolated', 'manual', or 'disabled'");
+    return;
+  }
+
+  // When set via the Electron JS API, persist isolated/manual modes across
+  // navigations. The extensions API calls SetZoomMode on the controller
+  // directly and won't set this flag, preserving Chromium's default behavior.
+  zoom_controller_->SetPersistZoomMode(
+      zoom_mode == WebContentsZoomController::ZOOM_MODE_ISOLATED ||
+      zoom_mode == WebContentsZoomController::ZOOM_MODE_MANUAL);
+  zoom_controller_->SetZoomMode(zoom_mode);
+}
+
+std::string WebContents::GetZoomMode() const {
+  switch (zoom_controller_->zoom_mode()) {
+    case WebContentsZoomController::ZOOM_MODE_ISOLATED:
+      return "isolated";
+    case WebContentsZoomController::ZOOM_MODE_MANUAL:
+      return "manual";
+    case WebContentsZoomController::ZOOM_MODE_DISABLED:
+      return "disabled";
+    default:
+      return "default";
+  }
+}
+
 void WebContents::SetTemporaryZoomLevel(double level) {
   zoom_controller_->SetTemporaryZoomLevel(level);
 }
@@ -4613,6 +4652,8 @@ void WebContents::FillObjectTemplate(v8::Isolate* isolate,
       .SetMethod("getZoomLevel", &WebContents::GetZoomLevel)
       .SetMethod("setZoomFactor", &WebContents::SetZoomFactor)
       .SetMethod("getZoomFactor", &WebContents::GetZoomFactor)
+      .SetMethod("setZoomMode", &WebContents::SetZoomMode)
+      .SetMethod("getZoomMode", &WebContents::GetZoomMode)
       .SetMethod("getType", &WebContents::type)
       .SetMethod("_getPreloadScript", &WebContents::GetPreloadScript)
       .SetMethod("getLastWebPreferences", &WebContents::GetLastWebPreferences)

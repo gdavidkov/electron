@@ -108,6 +108,7 @@ bool WebContentsZoomController::SetZoomLevel(double level) {
     zoom_map->SetTemporaryZoomLevel(rfh_id, level);
     ZoomChangedEventData zoom_change_data(web_contents(), zoom_level_, level,
                                           true /* temporary */, zoom_mode_);
+    zoom_level_ = level;
     observers_.Notify(&WebContentsZoomObserver::OnZoomChanged,
                       zoom_change_data);
   } else {
@@ -251,6 +252,20 @@ void WebContentsZoomController::ResetZoomModeOnNavigationIfNeeded(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (zoom_mode_ != ZOOM_MODE_ISOLATED && zoom_mode_ != ZOOM_MODE_MANUAL)
     return;
+
+  // When persist_zoom_mode_ is set, keep the current zoom mode and re-apply
+  // the temporary zoom level for the new RenderFrameHost (which changes on
+  // cross-origin navigation).
+  if (persist_zoom_mode_) {
+    content::HostZoomMap* zoom_map =
+        content::HostZoomMap::GetForWebContents(web_contents());
+    content::GlobalRenderFrameHostId rfh_id =
+        web_contents()->GetPrimaryMainFrame()->GetGlobalId();
+    // Use zoom_level_ (our locally tracked value) rather than GetZoomLevel()
+    // because the new RenderFrameHost has no temporary zoom level yet.
+    zoom_map->SetTemporaryZoomLevel(rfh_id, zoom_level_);
+    return;
+  }
 
   content::HostZoomMap* zoom_map =
       content::HostZoomMap::GetForWebContents(web_contents());
