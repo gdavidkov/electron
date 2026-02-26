@@ -1539,6 +1539,13 @@ Returns `number` - the current zoom level.
 
 #### `contents.setZoomMode(mode)`
 
+<!--
+```YAML history
+added:
+  - pr-url: https://github.com/electron/electron/pull/XXXXX
+```
+-->
+
 * `mode` string - Can be `default`, `isolated`, `manual`, or `disabled`.
 
 Sets the zoom mode for this web contents.
@@ -1556,6 +1563,13 @@ Sets the zoom mode for this web contents.
 The `isolated` and `manual` zoom modes persist across navigations.
 
 #### `contents.getZoomMode()`
+
+<!--
+```YAML history
+added:
+  - pr-url: https://github.com/electron/electron/pull/XXXXX
+```
+-->
 
 Returns `string` - The current zoom mode. Can be `default`, `isolated`,
 `manual`, or `disabled`.
@@ -2369,6 +2383,13 @@ A `number` property that determines the zoom factor for this web contents.
 The zoom factor is the zoom percent divided by 100, so 300% = 3.0.
 
 #### `contents.zoomMode`
+
+<!--
+```YAML history
+added:
+  - pr-url: https://github.com/electron/electron/pull/XXXXX
+```
+-->
 
 A `string` property that determines the zoom mode for this web contents.
 

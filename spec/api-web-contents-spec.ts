@@ -2028,11 +2028,11 @@ describe('webContents module', () => {
       const w = new BrowserWindow({ show: false });
       await w.loadURL('about:blank');
 
-      (w.webContents as any).zoomMode = 'isolated';
-      expect((w.webContents as any).zoomMode).to.equal('isolated');
+      w.webContents.zoomMode = 'isolated';
+      expect(w.webContents.zoomMode).to.equal('isolated');
 
-      (w.webContents as any).zoomMode = 'default';
-      expect((w.webContents as any).zoomMode).to.equal('default');
+      w.webContents.zoomMode = 'default';
+      expect(w.webContents.zoomMode).to.equal('default');
     });
 
     it('throws on invalid zoom mode', async () => {
@@ -2167,9 +2167,9 @@ describe('webContents module', () => {
         w2.close();
       });
 
-      // w2 loads the target origin first at default zoom
+      // w2 loads the target origin first — reset any stale per-host zoom
       await w2.loadURL(serverUrl);
-      expect(w2.webContents.getZoomLevel()).to.equal(0);
+      w2.webContents.setZoomLevel(0);
 
       // w starts on a different origin, sets isolated zoom
       const crossSiteUrl = serverUrl.replace('127.0.0.1', 'localhost');
@@ -2183,6 +2183,322 @@ describe('webContents module', () => {
       // w2 should remain unaffected
       expect(w.webContents.getZoomLevel()).to.equal(2.0);
       expect(w2.webContents.getZoomLevel()).to.equal(0);
+    });
+
+    it('can set zoom mode via webPreferences', async () => {
+      const w = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          zoomMode: 'isolated'
+        }
+      });
+      await w.loadURL('about:blank');
+      expect(w.webContents.getZoomMode()).to.equal('isolated');
+    });
+
+    it('webPreferences zoomMode isolated prevents cross-tab zoom', async () => {
+      const w = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          zoomMode: 'isolated'
+        }
+      });
+      const w2 = new BrowserWindow({ show: false });
+      defer(() => {
+        w2.setClosable(true);
+        w2.close();
+      });
+
+      await w.loadURL('about:blank');
+      await w2.loadURL('about:blank');
+
+      w.webContents.setZoomLevel(2.0);
+      expect(w.webContents.getZoomLevel()).to.equal(2.0);
+      expect(w2.webContents.getZoomLevel()).to.not.equal(2.0);
+    });
+
+    it('webPreferences zoomMode disabled prevents zoom changes', async () => {
+      const w = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          zoomMode: 'disabled'
+        }
+      });
+      await w.loadURL('about:blank');
+
+      expect(w.webContents.getZoomMode()).to.equal('disabled');
+      w.webContents.setZoomLevel(2.0);
+      expect(w.webContents.getZoomLevel()).to.equal(0);
+    });
+
+    it('default mode shares zoom across same-origin tabs', async () => {
+      const w = new BrowserWindow({ show: false });
+      const w2 = new BrowserWindow({ show: false });
+      defer(() => {
+        w2.setClosable(true);
+        w2.close();
+      });
+
+      await w.loadURL('about:blank');
+      await w2.loadURL('about:blank');
+
+      try {
+        // Both in default mode — zoom should propagate per-domain
+        w.webContents.setZoomLevel(2.0);
+        expect(w2.webContents.getZoomLevel()).to.equal(2.0);
+      } finally {
+        // Reset per-host zoom in HostZoomMap to avoid leaking to other tests
+        w.webContents.setZoomLevel(0);
+      }
+    });
+
+    it('switching from isolated to default re-joins per-domain zoom', async () => {
+      const server = http.createServer((req, res) => {
+        res.end('hello');
+      });
+      const { url: serverUrl } = await listen(server);
+      defer(() => server.close());
+
+      const w = new BrowserWindow({ show: false });
+      const w2 = new BrowserWindow({ show: false });
+      defer(() => {
+        w2.setClosable(true);
+        w2.close();
+      });
+
+      await w.loadURL(serverUrl);
+      await w2.loadURL(serverUrl);
+      // Reset any stale per-host zoom from previous tests
+      w.webContents.setZoomLevel(0);
+
+      try {
+        // Isolated: w's zoom should NOT affect w2
+        w.webContents.setZoomMode('isolated');
+        w.webContents.setZoomLevel(2.0);
+        expect(w2.webContents.getZoomLevel()).to.equal(0);
+
+        // Switch back to default: w's zoom should now affect w2
+        w.webContents.setZoomMode('default');
+        w.webContents.setZoomLevel(3.0);
+        expect(w2.webContents.getZoomLevel()).to.equal(3.0);
+      } finally {
+        // Reset per-host zoom in HostZoomMap to avoid leaking to other tests
+        w.webContents.setZoomLevel(0);
+      }
+    });
+
+    it('webPreferences zoomMode isolated persists across navigation', async () => {
+      const server = http.createServer((req, res) => {
+        res.end('hello');
+      });
+      const { url: serverUrl } = await listen(server);
+      defer(() => server.close());
+
+      const w = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          zoomMode: 'isolated'
+        }
+      });
+      await w.loadURL(serverUrl);
+      w.webContents.setZoomLevel(2.0);
+
+      const crossSiteUrl = serverUrl.replace('127.0.0.1', 'localhost');
+      await w.loadURL(crossSiteUrl);
+
+      expect(w.webContents.getZoomMode()).to.equal('isolated');
+      expect(w.webContents.getZoomLevel()).to.equal(2.0);
+    });
+
+    it('preserves zoomMode and zoomLevel after reload', async () => {
+      const server = http.createServer((req, res) => {
+        res.end('hello');
+      });
+      const { url: serverUrl } = await listen(server);
+      defer(() => server.close());
+
+      const w = new BrowserWindow({ show: false });
+      await w.loadURL(serverUrl);
+
+      w.webContents.setZoomMode('isolated');
+      w.webContents.setZoomLevel(2.0);
+
+      // Reload the page
+      const reloadPromise = once(w.webContents, 'did-finish-load');
+      w.webContents.reload();
+      await reloadPromise;
+
+      expect(w.webContents.getZoomMode()).to.equal('isolated');
+      expect(w.webContents.getZoomLevel()).to.equal(2.0);
+    });
+
+    it('isolated mode with webPreferences.zoomFactor preserves zoom after navigation', async () => {
+      const server = http.createServer((req, res) => {
+        res.end('hello');
+      });
+      const { url: serverUrl } = await listen(server);
+      defer(() => server.close());
+
+      const w = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          zoomMode: 'isolated',
+          zoomFactor: 1.5
+        }
+      });
+      await w.loadURL(serverUrl);
+      w.webContents.setZoomLevel(2.0);
+
+      // Navigate cross-site — the zoomFactor must NOT override our isolated zoom
+      const crossSiteUrl = serverUrl.replace('127.0.0.1', 'localhost');
+      await w.loadURL(crossSiteUrl);
+
+      expect(w.webContents.getZoomMode()).to.equal('isolated');
+      expect(w.webContents.getZoomLevel()).to.equal(2.0);
+    });
+
+    it('preserves zoomMode and zoomLevel after same-origin navigation', async () => {
+      const server = http.createServer((req, res) => {
+        res.end('hello');
+      });
+      const { url: serverUrl } = await listen(server);
+      defer(() => server.close());
+
+      const w = new BrowserWindow({ show: false });
+      await w.loadURL(serverUrl);
+
+      w.webContents.setZoomMode('isolated');
+      w.webContents.setZoomLevel(2.0);
+
+      // Navigate to a different path on the same origin
+      await w.loadURL(serverUrl + '/other-page');
+
+      expect(w.webContents.getZoomMode()).to.equal('isolated');
+      expect(w.webContents.getZoomLevel()).to.equal(2.0);
+    });
+
+    it('webPreferences zoomFactor is applied as initial zoom in isolated mode', async () => {
+      const server = http.createServer((req, res) => {
+        res.end('hello');
+      });
+      const { url: serverUrl } = await listen(server);
+      defer(() => server.close());
+
+      const w = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          zoomMode: 'isolated',
+          zoomFactor: 1.5
+        }
+      });
+      await w.loadURL(serverUrl);
+
+      // The zoomFactor should be applied as the initial zoom level
+      expect(w.webContents.getZoomMode()).to.equal('isolated');
+      const zoomFactor = w.webContents.getZoomFactor();
+      expect(zoomFactor).to.be.closeTo(1.5, 0.05);
+    });
+
+    it('rapid mode switching does not crash', async () => {
+      const w = new BrowserWindow({ show: false });
+      await w.loadURL('about:blank');
+
+      // Rapidly switch between all modes
+      w.webContents.setZoomMode('isolated');
+      w.webContents.setZoomMode('manual');
+      w.webContents.setZoomMode('disabled');
+      w.webContents.setZoomMode('default');
+      w.webContents.setZoomMode('isolated');
+      w.webContents.setZoomMode('default');
+
+      expect(w.webContents.getZoomMode()).to.equal('default');
+    });
+
+    it('mode transitions preserve expected zoom behavior', async () => {
+      const w = new BrowserWindow({ show: false });
+      await w.loadURL('about:blank');
+
+      // disabled -> isolated -> manual -> default
+      w.webContents.setZoomMode('disabled');
+      w.webContents.setZoomLevel(3.0);
+      expect(w.webContents.getZoomLevel()).to.equal(0); // disabled ignores zoom
+
+      w.webContents.setZoomMode('isolated');
+      w.webContents.setZoomLevel(2.0);
+      expect(w.webContents.getZoomLevel()).to.equal(2.0); // isolated works
+
+      w.webContents.setZoomMode('manual');
+      w.webContents.setZoomLevel(1.5);
+      expect(w.webContents.getZoomLevel()).to.equal(1.5); // manual tracks level
+
+      w.webContents.setZoomMode('default');
+      // After switching to default, zoom should be at the per-domain level
+      expect(w.webContents.getZoomMode()).to.equal('default');
+      // Reset per-host zoom in HostZoomMap to avoid leaking to other tests
+      w.webContents.setZoomLevel(0);
+    });
+
+    it('isolated mode does not share zoom across different sessions', async () => {
+      const w = new BrowserWindow({ show: false });
+      const w2 = new BrowserWindow({
+        show: false,
+        webPreferences: { partition: 'zoom-test-partition' }
+      });
+      defer(() => {
+        w2.setClosable(true);
+        w2.close();
+      });
+
+      await w.loadURL('about:blank');
+      await w2.loadURL('about:blank');
+
+      w.webContents.setZoomMode('isolated');
+      w.webContents.setZoomLevel(2.0);
+
+      // Different session — should never share zoom regardless of mode
+      expect(w2.webContents.getZoomLevel()).to.equal(0);
+    });
+
+    it('setZoomLevel and setZoomFactor are consistent in isolated mode', async () => {
+      const w = new BrowserWindow({ show: false });
+      await w.loadURL('about:blank');
+
+      w.webContents.setZoomMode('isolated');
+
+      // Set via setZoomFactor, read via getZoomLevel
+      w.webContents.setZoomFactor(1.5);
+      const levelFromFactor = w.webContents.getZoomLevel();
+      expect(levelFromFactor).to.not.equal(0);
+
+      // Set via setZoomLevel, read via getZoomFactor
+      w.webContents.setZoomLevel(0);
+      const factorFromLevel = w.webContents.getZoomFactor();
+      expect(factorFromLevel).to.be.closeTo(1.0, 0.05);
+    });
+
+    it('isolated mode works correctly after error page navigation', async () => {
+      const server = http.createServer((req, res) => {
+        res.end('hello');
+      });
+      const { url: serverUrl } = await listen(server);
+      defer(() => server.close());
+
+      const w = new BrowserWindow({ show: false });
+      await w.loadURL(serverUrl);
+
+      w.webContents.setZoomMode('isolated');
+      w.webContents.setZoomLevel(2.0);
+
+      // Navigate to an error page
+      await w.loadURL('http://localhost:1/nonexistent').catch(() => {});
+
+      // Mode should still be isolated
+      expect(w.webContents.getZoomMode()).to.equal('isolated');
+
+      // Navigate back to a valid page
+      await w.loadURL(serverUrl);
+      expect(w.webContents.getZoomMode()).to.equal('isolated');
+      expect(w.webContents.getZoomLevel()).to.equal(2.0);
     });
   });
 

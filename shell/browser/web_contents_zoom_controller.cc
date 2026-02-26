@@ -288,9 +288,13 @@ void WebContentsZoomController::ResetZoomModeOnNavigationIfNeeded(
   zoom_mode_ = ZOOM_MODE_DEFAULT;
 }
 
-void WebContentsZoomController::DidFinishNavigation(
+void WebContentsZoomController::ProcessNavigationZoom(
     content::NavigationHandle* navigation_handle) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (navigation_handle->GetNavigationId() == last_processed_navigation_id_)
+    return;
+  last_processed_navigation_id_ = navigation_handle->GetNavigationId();
+
   if (!navigation_handle->IsInPrimaryMainFrame() ||
       !navigation_handle->HasCommitted()) {
     return;
@@ -309,6 +313,11 @@ void WebContentsZoomController::DidFinishNavigation(
   }
 
   DCHECK(!event_data_);
+}
+
+void WebContentsZoomController::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  ProcessNavigationZoom(navigation_handle);
 }
 
 void WebContentsZoomController::WebContentsDestroyed() {
@@ -339,6 +348,12 @@ void WebContentsZoomController::RenderFrameHostChanged(
 void WebContentsZoomController::SetZoomFactorOnNavigationIfNeeded(
     const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // When persist_zoom_mode_ is set (isolated/manual via Electron API),
+  // the zoom level was already re-applied by ResetZoomModeOnNavigationIfNeeded.
+  // Don't let the default zoom factor override it.
+  if (persist_zoom_mode_)
+    return;
+
   if (blink::ZoomValuesEqual(default_zoom_factor(), kPageZoomEpsilon))
     return;
 
