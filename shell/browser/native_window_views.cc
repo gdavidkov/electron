@@ -95,7 +95,6 @@
 #include "skia/ext/skia_utils_win.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/win/hwnd_util.h"
-#include "ui/gfx/win/msg_util.h"
 #endif
 
 namespace electron {
@@ -161,18 +160,21 @@ gfx::Rect DIPToScreenRect(HWND hwnd, const gfx::Rect& pixel_bounds) {
 // rect when calculating min/max size, we should use the same implementation
 // when passing min/max size so we can get correct results.
 gfx::Size WindowSizeToContentSizeBuggy(HWND hwnd, const gfx::Size& size) {
-  // Calculate the size of window frame, using same code with the
-  // HWNDMessageHandler::OnGetMinMaxInfo method.
-  // The pitfall is, when window is minimized the calculated window frame size
-  // will be different from other states.
-  RECT client_rect, rect;
-  GetClientRect(hwnd, &client_rect);
-  GetWindowRect(hwnd, &rect);
-  CR_DEFLATE_RECT(&rect, &client_rect);
+  // Calculate frame insets at the current per-monitor DPI to stay consistent
+  // with HWNDMessageHandler::OnGetMinMaxInfo which scales constraints via
+  // DIPToScreenSize (using GetScaleFactorForHWND -> MonitorFromWindow).
+  // Using AdjustWindowRectExForDpi avoids the mixed-DPI bug where
+  // GetClientRect/GetWindowRect return pixels at the old/stale DPI during
+  // cross-monitor moves or initial window creation at (0,0).
+  RECT frame = {0, 0, 0, 0};
+  ::AdjustWindowRectExForDpi(&frame, ::GetWindowLong(hwnd, GWL_STYLE), FALSE,
+                             ::GetWindowLong(hwnd, GWL_EXSTYLE),
+                             ::GetDpiForWindow(hwnd));
   // Convert DIP size to pixel size, do calculation and then return DIP size.
   gfx::Rect screen_rect = DIPToScreenRect(hwnd, gfx::Rect(size));
-  gfx::Size screen_client_size(screen_rect.width() - (rect.right - rect.left),
-                               screen_rect.height() - (rect.bottom - rect.top));
+  gfx::Size screen_client_size(
+      screen_rect.width() - (frame.right - frame.left),
+      screen_rect.height() - (frame.bottom - frame.top));
   return ScreenToDIPRect(hwnd, gfx::Rect(screen_client_size)).size();
 }
 
