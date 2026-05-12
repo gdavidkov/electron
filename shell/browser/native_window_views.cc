@@ -167,9 +167,10 @@ gfx::Size WindowSizeToContentSizeBuggy(HWND hwnd, const gfx::Size& size) {
   // GetClientRect/GetWindowRect return pixels at the old/stale DPI during
   // cross-monitor moves or initial window creation at (0,0).
   RECT frame = {0, 0, 0, 0};
-  ::AdjustWindowRectExForDpi(&frame, ::GetWindowLong(hwnd, GWL_STYLE), FALSE,
-                             ::GetWindowLong(hwnd, GWL_EXSTYLE),
-                             ::GetDpiForWindow(hwnd));
+  ::AdjustWindowRectExForDpi(
+      &frame, static_cast<DWORD>(::GetWindowLong(hwnd, GWL_STYLE)), FALSE,
+      static_cast<DWORD>(::GetWindowLong(hwnd, GWL_EXSTYLE)),
+      ::GetDpiForWindow(hwnd));
   // Convert DIP size to pixel size, do calculation and then return DIP size.
   gfx::Rect screen_rect = DIPToScreenRect(hwnd, gfx::Rect(size));
   gfx::Size screen_client_size(

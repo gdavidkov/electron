@@ -1869,6 +1869,70 @@ describe('BrowserWindow module', () => {
       });
     });
 
+    ifdescribe(process.platform === 'win32')('frame inset consistency (Windows)', () => {
+      // Regression tests for the mixed-DPI frame inset bug where
+      // InflateClientSizeConstraintsInPixels used GetClientRect/GetWindowRect
+      // (stale DPI) while content sizes were already scaled to the current
+      // monitor's DPI. The fix uses AdjustWindowRectExForDpi(GetDpiForWindow)
+      // so insets and content match. CI runs at a single 96 DPI virtual
+      // display, but these tests still exercise the new code path and catch
+      // regressions in the helper. Cross-monitor scenarios remain manual.
+      afterEach(closeAllWindows);
+
+      for (const frame of [true, false]) {
+        describe(`frame: ${frame}`, () => {
+          it('window size is at least content size', () => {
+            const win = new BrowserWindow({ show: false, width: 400, height: 300, frame });
+            const [winW, winH] = win.getSize();
+            const [contentW, contentH] = win.getContentSize();
+            expect(winW).to.be.at.least(contentW);
+            expect(winH).to.be.at.least(contentH);
+          });
+
+          it('preserves size when min/max constraints are applied', () => {
+            const win = new BrowserWindow({ show: false, width: 400, height: 300, frame });
+            const original = win.getSize();
+            win.setMinimumSize(100, 100);
+            win.setMaximumSize(800, 600);
+            expectBoundsEqual(win.getSize(), original);
+          });
+
+          it('does not shrink the window when bounds are reapplied', () => {
+            const win = new BrowserWindow({ show: false, width: 400, height: 300, frame });
+            const bounds = win.getBounds();
+            win.setBounds(bounds);
+            expectBoundsEqual(win.getSize(), [400, 300]);
+          });
+
+          it('honors minimum size below typical Windows track size', () => {
+            // Regression test for the "56px ratchet" symptom: small minimums
+            // must not be inflated by a stale frame size.
+            const win = new BrowserWindow({
+              show: false,
+              width: 200,
+              height: 100,
+              minWidth: 100,
+              minHeight: 20,
+              frame
+            });
+            const [, minH] = win.getMinimumSize();
+            expect(minH).to.be.at.most(56);
+          });
+
+          it('respects aspect ratio without snapping to minimum', async () => {
+            const win = new BrowserWindow({ show: false, width: 400, height: 300, frame });
+            win.setAspectRatio(4 / 3);
+            const resize = once(win, 'resize');
+            win.setSize(800, 600);
+            await resize;
+            const [width, height] = win.getSize();
+            // Allow slack for frame rounding.
+            expect(Math.abs(width / height - 4 / 3)).to.be.below(0.05);
+          });
+        });
+      }
+    });
+
     describe('BrowserWindow.setAspectRatio(ratio)', () => {
       it('resets the behaviour when passing in 0', async () => {
         const size = [300, 400];
